@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Persistent Leaflet Map Tracker</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com" crossorigin="" />
+    
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+        }
+        #map {
+            height: 100%;
+            width: 100%;
+        }
+        .info-box {
+            position: absolute;
+            top: 10px;
+            left: 50px;
+            z-index: 1000;
+            background: white;
+            padding: 12px 18px;
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            font-family: Arial, sans-serif;
+        }
+        /* Style for popup forms */
+        .popup-form {
+            font-family: Arial, sans-serif;
+            min-width: 180px;
+        }
+        .popup-form textarea {
+            width: 100%;
+            margin-top: 5px;
+            margin-bottom: 8px;
+            box-sizing: border-box;
+            resize: none;
+        }
+        .popup-form button {
+            background: #0078ff;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            width: 100%;
+        }
+        .popup-form button.delete-btn {
+            background: #dc3545;
+            margin-top: 4px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="info-box">
+        <strong>🗺️ Persistent Map:</strong> Click to add a point. Notes save automatically to your local storage!
+    </div>
+    
+    <div id="map"></div>
+
+    <!-- Leaflet JavaScript -->
+    <script src="https://unpkg.com" crossorigin=""></script>
+    
+    <script>
+        // 1. Initialize Map
+        const map = L.map('map').setView([40.7128, -74.0060], 13);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        // 2. Database Layer (Mocking local database storage)
+        let savedPoints = JSON.parse(localStorage.getItem('mapPoints')) || [];
+        const activeMarkers = {}; // Keep track of rendered marker objects
+
+        // 3. Load existing points on startup
+        loadSavedPoints();
+
+        // 4. Handle clicks to add a *new* temporary point
+        map.on('click', function(e) {
+            const id = Date.now().toString(); // Generate unique ID
+            const lat = e.latlng.lat;
+            const lng = e.latlng.lng;
+
+            createMarker(id, lat, lng, "");
+            
+            // Open the popup immediately so they can type a note
+            activeMarkers[id].openPopup();
+        });
+
+        // 5. Core function to render a marker and handle its data state
+        function createMarker(id, lat, lng, notes) {
+            const marker = L.marker([lat, lng]).addTo(map);
+            activeMarkers[id] = marker;
+
+            // Generate dynamic HTML for popup with note text area
+            const popupContent = document.createElement('div');
+            popupContent.className = 'popup-form';
+            popupContent.innerHTML = `
+                <b>Location Note</b><br>
+                <small>${lat.toFixed(4)}, ${lng.toFixed(4)}</small>
+                <textarea id="note-${id}" rows="3" placeholder="Enter notes here...">${notes}</textarea>
+                <button onclick="saveNote('${id}', ${lat}, ${lng})">Save Changes</button>
+                <button class="delete-btn" onclick="deletePoint('${id}')">Delete Point</button>
+            `;
+
+            marker.bindPopup(popupContent);
+        }
+
+        // 6. Database Action: Save or Update point
+        window.saveNote = function(id, lat, lng) {
+            const noteText = document.getElementById(`note-${id}`).value;
+            
+            // Remove if already exists in array to prevent duplicates
+            savedPoints = savedPoints.filter(p => p.id !== id);
+            
+            // Push updated object
+            savedPoints.push({ id, lat, lng, notes: noteText });
+            
+            // Sync to local database storage
+            localStorage.setItem('mapPoints', JSON.stringify(savedPoints));
+            
+            activeMarkers[id].closePopup();
+            alert("Saved successfully!");
+        };
+
+        // 7. Database Action: Delete point
+        window.deletePoint = function(id) {
+            // Remove from map UI
+            map.removeLayer(activeMarkers[id]);
+            delete activeMarkers[id];
+
+            // Remove from array data
+            savedPoints = savedPoints.filter(p => p.id !== id);
+            
+            // Resync storage
+            localStorage.setItem('mapPoints', JSON.stringify(savedPoints));
+        };
+
+        // 8. Populate UI from storage loop
+        function loadSavedPoints() {
+            if(savedPoints.length > 0) {
+                savedPoints.forEach(point => {
+                    createMarker(point.id, point.lat, point.lng, point.notes);
+                });
+                
+                // Adjust map bounds to fit all existing markers nicely
+                const group = new L.featureGroup(Object.values(activeMarkers));
+                map.fitBounds(group.getBounds().pad(0.1));
+            }
+        }
+    </script>
+</body>
+</html>
