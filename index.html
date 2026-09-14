@@ -15,14 +15,15 @@
 
     .locate-btn {
       position:absolute;
-      top:10px;
-      left:10px;
+      bottom:20px;
+      left:20px;
       z-index:1000;
       background:white;
       border:1px solid #ccc;
-      padding:6px 10px;
+      padding:8px 12px;
       border-radius:6px;
       cursor:pointer;
+      box-shadow:0 2px 6px rgba(0,0,0,0.25);
     }
 
     .delete-btn {
@@ -76,7 +77,7 @@ const topo = L.esri.basemapLayer("Topographic");
 // ----------------------
 const map = L.map("map", {
   center: [35.912, -79.08],
-  zoom: 15,
+  zoom: 16,
   layers: [topo]
 });
 
@@ -126,12 +127,10 @@ function renderLocalPoints() {
       if (!btn) return;
 
       btn.onclick = () => {
-        // remove locally
         const updated = loadPoints().filter(p => p.localId !== pt.localId);
         savePoints(updated);
         localMarkers.removeLayer(marker);
 
-        // queue server delete if we have a serverId
         if (pt.serverId != null) {
           const queue = loadDeleteQueue();
           if (!queue.includes(pt.serverId)) {
@@ -163,16 +162,15 @@ query.where("1=1")
 
         const existing = loadPoints();
 
-		const serverPoints = fc.features
-		  .filter(f => f.attributes && f.geometry)   // ⭐ ignore corrupted features
-		  .map(f => ({
-			localId: "srv_" + f.attributes.OBJECTID,
-			serverId: f.attributes.OBJECTID,
-			lat: f.geometry.y,
-			lng: f.geometry.x,
-			notes: f.attributes.Notes || "(no notes added)"
-		  }));
-
+        const serverPoints = fc.features
+          .filter(f => f.attributes && f.geometry)
+          .map(f => ({
+            localId: "srv_" + f.attributes.OBJECTID,
+            serverId: f.attributes.OBJECTID,
+            lat: f.geometry.y,
+            lng: f.geometry.x,
+            notes: f.attributes.Notes || "(no notes added)"
+          }));
 
         const merged = [
           ...serverPoints.filter(sp => !existing.some(ep => ep.localId === sp.localId)),
@@ -184,7 +182,7 @@ query.where("1=1")
      });
 
 // ----------------------
-// Add point flow (clean popup)
+// Add point flow
 // ----------------------
 function addNewPoint(latlng, notes) {
   const points = loadPoints();
@@ -202,7 +200,6 @@ function addNewPoint(latlng, notes) {
   savePoints(points);
   renderLocalPoints();
 
-  // sync to server (add)
   featureLayer.addFeature({
     type: "Feature",
     geometry: {
@@ -219,14 +216,41 @@ function addNewPoint(latlng, notes) {
       );
       savePoints(updated);
     } else if (err) {
-      console.warn("Add feature failed, local only:", err);
+      console.warn("Add feature failed:", err);
     }
   });
 }
 
-// map click → "Add point to map" popup
+// ----------------------
+// Upload attachment
+// ----------------------
+function uploadAttachment(objectId, file) {
+  const url =
+    "https://services5.arcgis.com/uqbGfOz5OnchALvN/arcgis/rest/services/general_purpose_point_layer/FeatureServer/0/" +
+    objectId +
+    "/addAttachment";
+
+  const formData = new FormData();
+  formData.append("attachment", file);
+  formData.append("f", "json");
+
+  fetch(url, {
+    method: "POST",
+    body: formData
+  })
+  .then(r => r.json())
+  .then(result => {
+    console.log("Attachment upload result:", result);
+  })
+  .catch(err => {
+    console.error("Attachment upload failed:", err);
+  });
+}
+
+// ----------------------
+// Popup for adding points
+// ----------------------
 map.on("click", e => {
-  // ignore clicks on existing markers
   if (e.originalEvent.target.classList.contains("leaflet-interactive")) return;
 
   const latlng = e.latlng;
@@ -234,8 +258,13 @@ map.on("click", e => {
   const popupHTML = `
     <div>
       <textarea id="newPointNotes"
-  placeholder="Optional notes…"
-  style="width:100%;height:60px;"></textarea>
+        placeholder="Optional notes…"
+        style="width:100%;height:60px;"></textarea>
+
+      <input type="file" id="newPointPhoto"
+        accept="image/*"
+        style="margin-top:8px;width:100%;">
+
       <button id="addPointBtn" style="
         margin-top:8px;
         width:100%;
@@ -254,29 +283,41 @@ map.on("click", e => {
     .setContent(popupHTML)
     .openOn(map);
 
-  // ⭐ Store lat/lng globally for the delegated handler
   window._pendingLatLng = latlng;
 });
 
-// ⭐ Delegated click handler — ALWAYS works
+// Delegated click handler
 document.addEventListener("click", e => {
   if (e.target && e.target.id === "addPointBtn") {
     const textarea = document.getElementById("newPointNotes");
+    const photoInput = document.getElementById("newPointPhoto");
     const notes = textarea ? textarea.value.trim() : "";
     const latlng = window._pendingLatLng;
 
-    if (latlng) {
-      addNewPoint(latlng, notes);
-      map.closePopup();
-      window._pendingLatLng = null;
+    if (!latlng) return;
+
+    addNewPoint(latlng, notes);
+
+    if (photoInput && photoInput.files.length > 0) {
+      const file = photoInput.files[0];
+
+      setTimeout(() => {
+        const points = loadPoints();
+        const newPoint = points[points.length - 1];
+
+        if (newPoint.serverId) {
+          uploadAttachment(newPoint.serverId, file);
+        }
+      }, 800);
     }
+
+    map.closePopup();
+    window._pendingLatLng = null;
   }
 });
 
-
-
 // ----------------------
-// Delete queue worker (server sync for deletes)
+// Delete queue worker
 // ----------------------
 setInterval(() => {
   const queue = loadDeleteQueue();
@@ -284,8 +325,8 @@ setInterval(() => {
 
   const serverId = queue[0];
 
-  // Use raw REST delete instead of featureLayer.deleteFeature()
-  const url = "https://services5.arcgis.com/uqbGfOz5OnchALvN/arcgis/rest/services/general_purpose_point_layer/FeatureServer/0/deleteFeatures";
+  const url =
+    "https://services5.arcgis.com/uqbGfOz5OnchALvN/arcgis/rest/services/general_purpose_point_layer/FeatureServer/0/deleteFeatures";
 
   const params = new URLSearchParams({
     objectIds: serverId,
@@ -299,19 +340,17 @@ setInterval(() => {
   .then(r => r.json())
   .then(result => {
     if (result.deleteResults && result.deleteResults[0].success) {
-      // success → remove from queue
       const newQueue = loadDeleteQueue().filter(id => id !== serverId);
       saveDeleteQueue(newQueue);
     } else {
-      console.warn("Server delete failed, will retry:", result);
+      console.warn("Server delete failed:", result);
     }
   })
   .catch(err => {
-    console.warn("Delete request error, will retry:", err);
+    console.warn("Delete request error:", err);
   });
 
 }, 10000);
-
 
 // ----------------------
 // Geolocation
