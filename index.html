@@ -36,6 +36,11 @@
       cursor:pointer;
       margin-top:6px;
     }
+	.tree-icon {
+  font-size: 20px;
+  line-height: 20px;
+}
+
   </style>
 </head>
 
@@ -44,25 +49,6 @@
 <div id="map"></div>
 
 <script>
-// ----------------------
-// LocalStorage helpers
-// ----------------------
-function loadPoints() {
-  return JSON.parse(localStorage.getItem("points") || "[]");
-}
-
-function savePoints(points) {
-  localStorage.setItem("points", JSON.stringify(points));
-}
-
-function loadDeleteQueue() {
-  return JSON.parse(localStorage.getItem("deleteQueue") || "[]");
-}
-
-function saveDeleteQueue(queue) {
-  localStorage.setItem("deleteQueue", JSON.stringify(queue));
-}
-
 // ----------------------
 // Basemaps
 // ----------------------
@@ -88,169 +74,67 @@ L.control.layers(
 ).addTo(map);
 
 // ----------------------
-// FeatureLayer (for sync)
+// FeatureLayer
 // ----------------------
+const featureLayerUrl =
+  "https://services5.arcgis.com/uqbGfOz5OnchALvN/arcgis/rest/services/general_purpose_point_layer/FeatureServer/0";
+
 const featureLayer = L.esri.featureLayer({
-  url: "https://services5.arcgis.com/uqbGfOz5OnchALvN/arcgis/rest/services/general_purpose_point_layer/FeatureServer/0"
-});
+  url: featureLayerUrl,
+  where: "expired <> 'yes' OR expired IS NULL",
+	pointToLayer: function (feature, latlng) {
+	  return L.marker(latlng, {
+		icon: L.divIcon({
+		  className: "tree-icon",
+		  html: "🌳",
+		  iconSize: [24, 24],
+		  iconAnchor: [12, 12]
+		})
+	  });
+	}
+,
+  onEachFeature: function (feature, layer) {
+    const attrs = feature.properties || feature.attributes || {};
+    const notes = attrs.Notes || "(no notes added)";
+    const objectId = attrs.OBJECTID;
 
-// ----------------------
-// Local markers
-// ----------------------
-const localMarkers = L.featureGroup().addTo(map);
-
-function renderLocalPoints() {
-  localMarkers.clearLayers();
-  const points = loadPoints();
-
-  points.forEach(pt => {
-    const marker = L.circleMarker([pt.lat, pt.lng], {
-      radius: 6,
-      color: "red",
-      weight: 2,
-      fillOpacity: 0.9
-    });
-
-    marker.bindPopup(`
+    const popupHTML = `
       <div>
         <strong>Notes:</strong><br>
         <div style="margin:6px 0; padding:6px; border:1px solid #ccc;">
-          ${pt.notes || "(no notes added)"}
+          ${notes}
         </div>
         <button class="delete-btn" id="deletePointBtn">Delete Point</button>
       </div>
-    `);
+    `;
 
-    marker.on("popupopen", ev => {
+    layer.bindPopup(popupHTML);
+
+    layer.on("popupopen", function (ev) {
       const popupEl = ev.popup.getElement();
       const btn = popupEl.querySelector("#deletePointBtn");
-      if (!btn) return;
+      if (!btn || objectId == null) return;
 
-      btn.onclick = () => {
-        const updated = loadPoints().filter(p => p.localId !== pt.localId);
-        savePoints(updated);
-        localMarkers.removeLayer(marker);
+		btn.onclick = function () {
+		  softDeleteOnServer(objectId, function (ok) {
+			if (ok) {
+			  // Just remove the marker from the map
+			  layer.remove();
+			} else {
+			  console.warn("Soft delete failed for OBJECTID", objectId);
+			}
+		  });
+		};
 
-        if (pt.serverId != null) {
-          const queue = loadDeleteQueue();
-          if (!queue.includes(pt.serverId)) {
-            queue.push(pt.serverId);
-            saveDeleteQueue(queue);
-          }
-        }
-      };
+
     });
-
-    localMarkers.addLayer(marker);
-  });
-}
-
-// ----------------------
-// Load existing server features into localStorage
-// ----------------------
-const query = featureLayer.query();
-
-query.where("1=1")
-     .returnGeometry(true)
-     .fields(["*"])
-     .run((err, fc) => {
-        if (err) {
-          console.error("Query error:", err);
-          renderLocalPoints();
-          return;
-        }
-
-        const existing = loadPoints();
-
-        const serverPoints = fc.features
-          .filter(f => f.attributes && f.geometry)
-          .map(f => ({
-            localId: "srv_" + f.attributes.OBJECTID,
-            serverId: f.attributes.OBJECTID,
-            lat: f.geometry.y,
-            lng: f.geometry.x,
-            notes: f.attributes.Notes || "(no notes added)"
-          }));
-
-        const merged = [
-          ...serverPoints.filter(sp => !existing.some(ep => ep.localId === sp.localId)),
-          ...existing
-        ];
-
-        savePoints(merged);
-        renderLocalPoints();
-     });
+  }
+}).addTo(map);
 
 // ----------------------
 // Add point flow
 // ----------------------
-function addNewPoint(latlng, notes) {
-  const points = loadPoints();
-  const newLocalId = "loc_" + Date.now();
-
-  const newPoint = {
-    localId: newLocalId,
-    serverId: null,
-    lat: latlng.lat,
-    lng: latlng.lng,
-    notes: notes || ""
-  };
-
-  points.push(newPoint);
-  savePoints(points);
-  renderLocalPoints();
-
-  featureLayer.addFeature({
-    type: "Feature",
-    geometry: {
-      type: "Point",
-      coordinates: [latlng.lng, latlng.lat]
-    },
-    properties: {
-      Notes: notes || ""
-    }
-  }, (err, result) => {
-    if (!err && result && result.objectId != null) {
-      const updated = loadPoints().map(p =>
-        p.localId === newLocalId ? { ...p, serverId: result.objectId } : p
-      );
-      savePoints(updated);
-    } else if (err) {
-      console.warn("Add feature failed:", err);
-    }
-  });
-}
-
-// ----------------------
-// Upload attachment
-// ----------------------
-function uploadAttachment(objectId, file) {
-  const url =
-    "https://services5.arcgis.com/uqbGfOz5OnchALvN/arcgis/rest/services/general_purpose_point_layer/FeatureServer/0/" +
-    objectId +
-    "/addAttachment";
-
-  const formData = new FormData();
-  formData.append("attachment", file);
-  formData.append("f", "json");
-
-  fetch(url, {
-    method: "POST",
-    body: formData
-  })
-  .then(r => r.json())
-  .then(result => {
-    console.log("Attachment upload result:", result);
-  })
-  .catch(err => {
-    console.error("Attachment upload failed:", err);
-  });
-}
-
-// ----------------------
-// Popup for adding points
-// ----------------------
-map.on("click", e => {
+map.on("click", function (e) {
   if (e.originalEvent.target.classList.contains("leaflet-interactive")) return;
 
   const latlng = e.latlng;
@@ -286,8 +170,8 @@ map.on("click", e => {
   window._pendingLatLng = latlng;
 });
 
-// Delegated click handler
-document.addEventListener("click", e => {
+// delegated handler for Add Point
+document.addEventListener("click", function (e) {
   if (e.target && e.target.id === "addPointBtn") {
     const textarea = document.getElementById("newPointNotes");
     const photoInput = document.getElementById("newPointPhoto");
@@ -296,20 +180,7 @@ document.addEventListener("click", e => {
 
     if (!latlng) return;
 
-    addNewPoint(latlng, notes);
-
-    if (photoInput && photoInput.files.length > 0) {
-      const file = photoInput.files[0];
-
-      setTimeout(() => {
-        const points = loadPoints();
-        const newPoint = points[points.length - 1];
-
-        if (newPoint.serverId) {
-          uploadAttachment(newPoint.serverId, file);
-        }
-      }, 800);
-    }
+    addNewPoint(latlng, notes, photoInput);
 
     map.closePopup();
     window._pendingLatLng = null;
@@ -317,19 +188,52 @@ document.addEventListener("click", e => {
 });
 
 // ----------------------
-// Delete queue worker
+// Add feature + optional attachment
 // ----------------------
-setInterval(() => {
-  const queue = loadDeleteQueue();
-  if (!queue.length) return;
+function addNewPoint(latlng, notes, photoInput) {
+  featureLayer.addFeature({
+    type: "Feature",
+    geometry: {
+      type: "Point",
+      coordinates: [latlng.lng, latlng.lat]
+    },
+    properties: {
+      Notes: notes || "",
+      expired: "no"
+    }
+  }, function (err, result) {
+    if (err) {
+      console.warn("Add feature failed:", err);
+      return;
+    }
 
-  const serverId = queue[0];
+    console.log("Add feature result:", result);
 
-  const url =
-    "https://services5.arcgis.com/uqbGfOz5OnchALvN/arcgis/rest/services/general_purpose_point_layer/FeatureServer/0/deleteFeatures";
+    const objectId = result && result.objectId;
+    if (!objectId) return;
+
+    if (photoInput && photoInput.files && photoInput.files.length > 0) {
+      const file = photoInput.files[0];
+      uploadAttachment(objectId, file);
+    }
+  });
+}
+
+// ----------------------
+// Soft delete on server (expired = "yes")
+// ----------------------
+function softDeleteOnServer(objectId, callback) {
+  const url = featureLayerUrl + "/updateFeatures";
+
+  const featurePayload = [{
+    attributes: {
+      OBJECTID: objectId,
+      expired: "yes"
+    }
+  }];
 
   const params = new URLSearchParams({
-    objectIds: serverId,
+    features: JSON.stringify(featurePayload),
     f: "json"
   });
 
@@ -339,27 +243,52 @@ setInterval(() => {
   })
   .then(r => r.json())
   .then(result => {
-    if (result.deleteResults && result.deleteResults[0].success) {
-      const newQueue = loadDeleteQueue().filter(id => id !== serverId);
-      saveDeleteQueue(newQueue);
-    } else {
-      console.warn("Server delete failed:", result);
+    console.log("Soft delete result:", result);
+    const res = result.updateResults && result.updateResults[0];
+    const ok = !!(res && res.success);
+    if (!ok) {
+      console.warn("Soft delete error:", res && res.error);
     }
+    if (callback) callback(ok);
   })
   .catch(err => {
-    console.warn("Delete request error:", err);
+    console.warn("Soft delete request error:", err);
+    if (callback) callback(false);
   });
+}
 
-}, 10000);
+// ----------------------
+// Upload attachment
+// ----------------------
+function uploadAttachment(objectId, file) {
+  const url =
+    featureLayerUrl + "/" + objectId + "/addAttachment";
+
+  const formData = new FormData();
+  formData.append("attachment", file);
+  formData.append("f", "json");
+
+  fetch(url, {
+    method: "POST",
+    body: formData
+  })
+  .then(r => r.json())
+  .then(result => {
+    console.log("Attachment upload result:", result);
+  })
+  .catch(err => {
+    console.error("Attachment upload failed:", err);
+  });
+}
 
 // ----------------------
 // Geolocation
 // ----------------------
-document.getElementById("locateBtn").onclick = () => {
+document.getElementById("locateBtn").onclick = function () {
   map.locate({ setView: true, maxZoom: 17 });
 };
 
-map.on("locationfound", e => {
+map.on("locationfound", function (e) {
   L.circleMarker(e.latlng, {
     radius: 8,
     color: "blue",
