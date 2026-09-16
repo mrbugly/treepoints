@@ -36,16 +36,75 @@
       cursor:pointer;
       margin-top:6px;
     }
-	.tree-icon {
-  font-size: 20px;
-  line-height: 20px;
-}
 
+    /* 🌳 Emoji tree marker */
+    .tree-icon {
+      font-size: 24px;
+      line-height: 24px;
+    }
+
+    /* 📎 Attach File button */
+    .attach-btn {
+      display: inline-block;
+      padding: 4px;
+      background: #0078ff;
+      color: white;
+      border-radius: 0px;
+      cursor: pointer;
+      text-align: center;
+      width: 80%;
+      margin-top: 6px;
+      font-size: 14px;
+    }
+
+	.measure-btn {
+	  position:absolute;
+	  bottom:70px;
+	  left:20px;
+	  z-index:1000;
+	  background:white;
+	  border:1px solid #ccc;
+	  padding:8px 12px;
+	  border-radius:6px;
+	  cursor:pointer;
+	  box-shadow:0 2px 6px rgba(0,0,0,0.25);
+	}
+
+	.measure-btn.active {
+	  background:#0078ff;
+	  color:white;
+	  border-color:#005fcc;
+	}
+
+	.measure-cursor {
+	  cursor: crosshair !important;
+	}
+
+
+	.edit-btn {
+	  width:100%;
+	  padding:6px 10px;
+	  background:#0078ff;
+	  color:white;
+	  border:none;
+	  border-radius:4px;
+	  cursor:pointer;
+	  margin-top:6px;
+	}
+
+
+
+
+    /* Hide default file input */
+    #newPointPhoto {
+      display: none;
+    }
   </style>
 </head>
 
 <body>
 <button class="locate-btn" id="locateBtn">📍 Locate Me</button>
+<button class="measure-btn" id="measureBtn">📏 Measure</button>
 <div id="map"></div>
 
 <script>
@@ -82,59 +141,191 @@ const featureLayerUrl =
 const featureLayer = L.esri.featureLayer({
   url: featureLayerUrl,
   where: "expired <> 'yes' OR expired IS NULL",
-	pointToLayer: function (feature, latlng) {
-	  return L.marker(latlng, {
-		icon: L.divIcon({
-		  className: "tree-icon",
-		  html: "🌳",
-		  iconSize: [24, 24],
-		  iconAnchor: [12, 12]
-		})
+
+  pointToLayer: function (feature, latlng) {
+    return L.marker(latlng, {
+      icon: L.divIcon({
+        className: "tree-icon",
+        html: "🌳",
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
+      })
+    });
+  },
+
+	onEachFeature: function (feature, layer) {
+	  const attrs = feature.properties || feature.attributes || {};
+	  const objectId = attrs.OBJECTID;
+
+	  const popupHTML = `
+		<div>
+		  <strong>Notes:</strong><br>
+		  <div id="notesDisplay" style="margin:6px 0; padding:6px; border:1px solid #ccc;"></div>
+
+		  <button class="edit-btn" id="editNotesBtn">Edit Notes</button>
+		  <button class="delete-btn" id="deletePointBtn">Delete Point</button>
+		</div>
+	  `;
+
+	  layer.bindPopup(popupHTML);
+
+	  layer.on("popupopen", function (ev) {
+		const popupEl = ev.popup.getElement();
+		const notesBox = popupEl.querySelector("#notesDisplay");
+
+		// 🔹 Always show the *current* Notes from the feature
+		const currentNotes = (layer.feature.properties.Notes || "").trim();
+		notesBox.textContent = currentNotes || "(no notes added)";
+
+		const editBtn = popupEl.querySelector("#editNotesBtn");
+		const deleteBtn = popupEl.querySelector("#deletePointBtn");
+
+		// EDIT NOTES
+		if (editBtn) {
+		  editBtn.onclick = function () {
+			notesBox.innerHTML = `
+			  <textarea id="editNotesArea"
+				style="width:100%;height:80px;">${currentNotes}</textarea>
+			  <button id="saveNotesBtn"
+				style="margin-top:8px;width:100%;padding:6px;background:#28a745;color:white;border:none;border-radius:4px;cursor:pointer;">
+				Save Notes
+			  </button>
+			`;
+
+			const saveBtn = popupEl.querySelector("#saveNotesBtn");
+			saveBtn.onclick = function () {
+			  const newNotes = popupEl.querySelector("#editNotesArea").value.trim();
+
+			  updateNotesOnServer(objectId, newNotes, function (ok) {
+				if (ok) {
+				  // 🔹 Update local feature
+				  layer.feature.properties.Notes = newNotes;
+
+				  // 🔹 Restore plain text display
+				  notesBox.textContent = newNotes || "(no notes added)";
+				} else {
+				  console.warn("Failed to update notes for OBJECTID", objectId);
+				}
+			  });
+			};
+		  };
+		}
+
+		// DELETE POINT
+		if (deleteBtn) {
+		  deleteBtn.onclick = function () {
+			softDeleteOnServer(objectId, function (ok) {
+			  if (ok) layer.remove();
+			});
+		  };
+		}
 	  });
 	}
-,
-  onEachFeature: function (feature, layer) {
-    const attrs = feature.properties || feature.attributes || {};
-    const notes = attrs.Notes || "(no notes added)";
-    const objectId = attrs.OBJECTID;
 
-    const popupHTML = `
-      <div>
-        <strong>Notes:</strong><br>
-        <div style="margin:6px 0; padding:6px; border:1px solid #ccc;">
-          ${notes}
-        </div>
-        <button class="delete-btn" id="deletePointBtn">Delete Point</button>
-      </div>
-    `;
-
-    layer.bindPopup(popupHTML);
-
-    layer.on("popupopen", function (ev) {
-      const popupEl = ev.popup.getElement();
-      const btn = popupEl.querySelector("#deletePointBtn");
-      if (!btn || objectId == null) return;
-
-		btn.onclick = function () {
-		  softDeleteOnServer(objectId, function (ok) {
-			if (ok) {
-			  // Just remove the marker from the map
-			  layer.remove();
-			} else {
-			  console.warn("Soft delete failed for OBJECTID", objectId);
-			}
-		  });
-		};
-
-
-    });
-  }
 }).addTo(map);
 
+
 // ----------------------
-// Add point flow
+// Popup handler 
+// ----------------------
+
+function attachPopupHandlers(layer, objectId) {
+  const popupEl = layer.getPopup().getElement();
+
+  const editBtn = popupEl.querySelector("#editNotesBtn");
+  const deleteBtn = popupEl.querySelector("#deletePointBtn");
+
+  if (editBtn) {
+    editBtn.onclick = function () {
+      const notesBox = popupEl.querySelector("#notesDisplay");
+      const currentNotes = notesBox.innerText.trim();
+
+      notesBox.innerHTML = `
+        <textarea id="editNotesArea"
+          style="width:100%;height:80px;">${currentNotes}</textarea>
+        <button id="saveNotesBtn"
+          style="margin-top:8px;width:100%;padding:6px;background:#28a745;color:white;border:none;border-radius:4px;cursor:pointer;">
+          Save Notes
+        </button>
+      `;
+
+      const saveBtn = popupEl.querySelector("#saveNotesBtn");
+      saveBtn.onclick = function () {
+        const newNotes = popupEl.querySelector("#editNotesArea").value.trim();
+        updateNotesOnServer(objectId, newNotes, function (ok) {
+          if (ok) {
+            layer.feature.properties.Notes = newNotes;
+            notesBox.innerHTML = newNotes;
+
+            notesBox.insertAdjacentHTML("afterend", `
+              <button class="edit-btn" id="editNotesBtn">Edit Notes</button>
+              <button class="delete-btn" id="deletePointBtn">Delete Point</button>
+            `);
+
+            attachPopupHandlers(layer, objectId);
+          }
+        });
+      };
+    };
+  }
+
+  if (deleteBtn) {
+    deleteBtn.onclick = function () {
+      softDeleteOnServer(objectId, function (ok) {
+        if (ok) layer.remove();
+      });
+    };
+  }
+}
+
+
+
+
+
+// ----------------------
+// Update Notes 
+// ----------------------
+function updateNotesOnServer(objectId, newNotes, callback) {
+  const url = featureLayerUrl + "/updateFeatures";
+
+  const featurePayload = [{
+    attributes: {
+      OBJECTID: objectId,
+      Notes: newNotes
+    }
+  }];
+
+  const params = new URLSearchParams({
+    features: JSON.stringify(featurePayload),
+    f: "json"
+  });
+
+  fetch(url, {
+    method: "POST",
+    body: params
+  })
+  .then(r => r.json())
+  .then(result => {
+    const res = result.updateResults && result.updateResults[0];
+    const ok = !!(res && res.success);
+    callback(ok);
+  })
+  .catch(err => {
+    console.warn("Update notes request error:", err);
+    callback(false);
+  });
+}
+
+
+
+// ----------------------
+// Add point flow 📎 
 // ----------------------
 map.on("click", function (e) {
+
+  // 🚫 BLOCK add‑point popup when measuring
+  if (measuring) return;
+
   if (e.originalEvent.target.classList.contains("leaflet-interactive")) return;
 
   const latlng = e.latlng;
@@ -145,19 +336,21 @@ map.on("click", function (e) {
         placeholder="Optional notes…"
         style="width:100%;height:60px;"></textarea>
 
-      <input type="file" id="newPointPhoto"
-        accept="image/*"
-        style="margin-top:8px;width:100%;">
+      <input type="file" id="newPointPhoto" accept="image/*">
+
+      <div class="attach-btn" id="attachFileBtn">Attach File</div>
 
       <button id="addPointBtn" style="
-        margin-top:8px;
-        width:100%;
-        padding:6px;
-        background:#0078ff;
-        color:white;
-        border:none;
-        border-radius:4px;
-        cursor:pointer;
+      display: inline-block;
+      padding: 4px;
+      background: #0078ff;
+      color: white;
+      border-radius: 0px;
+      cursor: pointer;
+      text-align: center;
+      width: 80%;
+      margin-top: 6px;
+      font-size: 14px;
       ">Add Point</button>
     </div>
   `;
@@ -170,8 +363,17 @@ map.on("click", function (e) {
   window._pendingLatLng = latlng;
 });
 
-// delegated handler for Add Point
+// ----------------------
+// Delegated click handler
+// ----------------------
 document.addEventListener("click", function (e) {
+
+  // 📎 Attach File button
+  if (e.target && e.target.id === "attachFileBtn") {
+    document.getElementById("newPointPhoto").click();
+  }
+
+  // Add Point button
   if (e.target && e.target.id === "addPointBtn") {
     const textarea = document.getElementById("newPointNotes");
     const photoInput = document.getElementById("newPointPhoto");
@@ -207,20 +409,17 @@ function addNewPoint(latlng, notes, photoInput) {
       return;
     }
 
-    console.log("Add feature result:", result);
-
     const objectId = result && result.objectId;
     if (!objectId) return;
 
     if (photoInput && photoInput.files && photoInput.files.length > 0) {
-      const file = photoInput.files[0];
-      uploadAttachment(objectId, file);
+      uploadAttachment(objectId, photoInput.files[0]);
     }
   });
 }
 
 // ----------------------
-// Soft delete on server (expired = "yes")
+// Soft delete on server
 // ----------------------
 function softDeleteOnServer(objectId, callback) {
   const url = featureLayerUrl + "/updateFeatures";
@@ -243,17 +442,14 @@ function softDeleteOnServer(objectId, callback) {
   })
   .then(r => r.json())
   .then(result => {
-    console.log("Soft delete result:", result);
     const res = result.updateResults && result.updateResults[0];
     const ok = !!(res && res.success);
-    if (!ok) {
-      console.warn("Soft delete error:", res && res.error);
-    }
-    if (callback) callback(ok);
+    if (!ok) console.warn("Soft delete error:", res && res.error);
+    callback(ok);
   })
   .catch(err => {
     console.warn("Soft delete request error:", err);
-    if (callback) callback(false);
+    callback(false);
   });
 }
 
@@ -261,8 +457,7 @@ function softDeleteOnServer(objectId, callback) {
 // Upload attachment
 // ----------------------
 function uploadAttachment(objectId, file) {
-  const url =
-    featureLayerUrl + "/" + objectId + "/addAttachment";
+  const url = featureLayerUrl + "/" + objectId + "/addAttachment";
 
   const formData = new FormData();
   formData.append("attachment", file);
@@ -296,6 +491,130 @@ map.on("locationfound", function (e) {
     fillOpacity: 0.7
   }).addTo(map);
 });
+
+
+// ----------------------
+// Measure
+// ----------------------
+let measuring = false;
+let measureStart = null;
+
+// Arrays to store ALL measurement graphics
+let measureLines = [];
+let measureMarkers = [];
+let measureLabels = [];
+
+const measureBtn = document.getElementById("measureBtn");
+
+// Toggle measure mode
+measureBtn.onclick = function () {
+  measuring = !measuring;
+
+  if (measuring) {
+    measureBtn.classList.add("active");
+    map.getContainer().classList.add("measure-cursor");
+    measureStart = null;
+  } else {
+    measureBtn.classList.remove("active");
+    map.getContainer().classList.remove("measure-cursor");
+    clearAllMeasurements();
+  }
+};
+
+// Clear ALL measurement graphics
+function clearAllMeasurements() {
+  measureStart = null;
+
+  measureLines.forEach(line => map.removeLayer(line));
+  measureMarkers.forEach(marker => map.removeLayer(marker));
+  measureLabels.forEach(label => map.removeLayer(label));
+
+  measureLines = [];
+  measureMarkers = [];
+  measureLabels = [];
+}
+
+// MEASURE CLICK HANDLER
+map.on("click", function (e) {
+
+  // 🚫 BLOCK add‑point popup when measuring
+  if (!measuring) return;
+
+  L.DomEvent.stop(e);
+
+  // FIRST POINT
+  if (!measureStart) {
+    measureStart = e.latlng;
+
+    const marker1 = L.marker(e.latlng, {
+      icon: L.divIcon({
+        className: "measure-point",
+        html: "<div style='background:#0078ff;color:white;padding:4px 6px;border-radius:4px;font-size:14px;'>1</div>",
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
+      })
+    }).addTo(map);
+
+    measureMarkers.push(marker1);
+    return;
+  }
+
+  // SECOND POINT
+  const measureEnd = e.latlng;
+
+  const marker2 = L.marker(measureEnd, {
+    icon: L.divIcon({
+      className: "measure-point",
+      html: "<div style='background:#0078ff;color:white;padding:4px 6px;border-radius:4px;font-size:14px;'>2</div>",
+      iconSize: [24, 24],
+      iconAnchor: [12, 12]
+    })
+  }).addTo(map);
+
+  measureMarkers.push(marker2);
+
+  // Compute distance
+  const meters = measureStart.distanceTo(measureEnd);
+  const feet = meters * 3.28084;
+
+  // Draw dashed line
+  const line = L.polyline([measureStart, measureEnd], {
+    color: "blue",
+    weight: 3,
+    dashArray: "6, 6"
+  }).addTo(map);
+
+  measureLines.push(line);
+
+  // Floating label (no popup)
+  const label = L.marker(measureEnd, {
+    icon: L.divIcon({
+      className: "measure-label",
+      html: `<div style="
+        background:white;
+        border:1px solid #0078ff;
+        padding:4px 6px;
+        border-radius:4px;
+        font-size:14px;
+        color:#0078ff;
+        white-space:nowrap;
+      ">${feet.toFixed(1)} ft</div>`,
+      iconSize: [80, 24],
+      iconAnchor: [40, -10]
+    })
+  }).addTo(map);
+
+  measureLabels.push(label);
+
+  // Reset for next measurement
+  measureStart = null;
+});
+
+
+
+
+
+
 </script>
 </body>
 </html>
