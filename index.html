@@ -80,6 +80,19 @@
 	  cursor: crosshair !important;
 	}
 
+	.addpoint-btn {
+	  position:absolute;
+	  bottom:120px;
+	  left:20px;
+	  z-index:1000;
+	  background:white;
+	  border:1px solid #ccc;
+	  padding:8px 12px;
+	  border-radius:6px;
+	  cursor:pointer;
+	  box-shadow:0 2px 6px rgba(0,0,0,0.25);
+	}
+
 
 	.edit-btn {
 	  width:100%;
@@ -93,8 +106,6 @@
 	}
 
 
-
-
     /* Hide default file input */
     #newPointPhoto {
       display: none;
@@ -105,6 +116,7 @@
 <body>
 <button class="locate-btn" id="locateBtn">📍 Locate Me</button>
 <button class="measure-btn" id="measureBtn">📏 Measure</button>
+<button class="addpoint-btn" id="gpsPointBtn">➕ Add Point Here</button>
 <div id="map"></div>
 
 <script>
@@ -373,6 +385,66 @@ document.addEventListener("click", function (e) {
     document.getElementById("newPointPhoto").click();
   }
 
+
+
+
+function showAddPointPopup(latlng, accuracyMeters) {
+
+  const feet =
+    accuracyMeters * 3.28084;
+
+  const popupHTML = `
+    <div>
+
+      <div style="
+        margin-bottom:6px;
+        font-weight:bold;
+        color:#0078ff;
+      ">
+        Accuracy: ${feet.toFixed(1)} ft
+      </div>
+
+      <textarea id="newPointNotes"
+        placeholder="Optional notes..."
+        style="width:100%;height:60px;">
+      </textarea>
+
+      <input
+        type="file"
+        id="newPointPhoto"
+        accept="image/*">
+
+      <div
+        class="attach-btn"
+        id="attachFileBtn">
+        📎 Attach File
+      </div>
+
+      <button id="addPointBtn"
+        style="
+          display:inline-block;
+          padding:4px;
+          background:#0078ff;
+          color:white;
+          width:80%;
+          margin-top:6px;
+        ">
+        Save Point
+      </button>
+
+    </div>
+  `;
+
+  L.popup()
+    .setLatLng(latlng)
+    .setContent(popupHTML)
+    .openOn(map);
+
+  window._pendingLatLng = latlng;
+}
+
+
+
   // Add Point button
   if (e.target && e.target.id === "addPointBtn") {
     const textarea = document.getElementById("newPointNotes");
@@ -392,6 +464,12 @@ document.addEventListener("click", function (e) {
 // ----------------------
 // Add feature + optional attachment
 // ----------------------
+
+let collectingPoint = false;
+let gpsSamples = [];
+let pendingAverageLocation = null;
+let gpsWatchId = null;
+
 function addNewPoint(latlng, notes, photoInput) {
   featureLayer.addFeature({
     type: "Feature",
@@ -493,6 +571,72 @@ map.on("locationfound", function (e) {
 });
 
 
+
+document.getElementById("gpsPointBtn").onclick = function () {
+
+  if (collectingPoint) return;
+
+  collectingPoint = true;
+  gpsSamples = [];
+
+  const btn = document.getElementById("gpsPointBtn");
+  btn.textContent = "📡 Collecting GPS...";
+
+  gpsWatchId = navigator.geolocation.watchPosition(
+    function(position) {
+
+      gpsSamples.push({
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+        accuracy: position.coords.accuracy
+      });
+
+      btn.textContent =
+        `📡 GPS ${gpsSamples.length}/20`;
+
+      if (gpsSamples.length >= 20) {
+
+        navigator.geolocation.clearWatch(gpsWatchId);
+
+        const avgLat =
+          gpsSamples.reduce((s,p)=>s+p.lat,0)
+          / gpsSamples.length;
+
+        const avgLng =
+          gpsSamples.reduce((s,p)=>s+p.lng,0)
+          / gpsSamples.length;
+
+        const avgAccuracy =
+          gpsSamples.reduce((s,p)=>s+p.accuracy,0)
+          / gpsSamples.length;
+
+        pendingAverageLocation =
+          L.latLng(avgLat, avgLng);
+
+        collectingPoint = false;
+        btn.textContent = "➕ Add Point Here";
+
+        showAddPointPopup(
+          pendingAverageLocation,
+          avgAccuracy
+        );
+      }
+
+    },
+    function(err){
+      console.error(err);
+      collectingPoint = false;
+      btn.textContent = "➕ Add Point Here";
+    },
+    {
+      enableHighAccuracy:true,
+      maximumAge:0,
+      timeout:10000
+    }
+  );
+};
+
+
 // ----------------------
 // Measure
 // ----------------------
@@ -505,6 +649,9 @@ let measureMarkers = [];
 let measureLabels = [];
 
 const measureBtn = document.getElementById("measureBtn");
+
+
+
 
 // Toggle measure mode
 measureBtn.onclick = function () {
@@ -609,10 +756,6 @@ map.on("click", function (e) {
   // Reset for next measurement
   measureStart = null;
 });
-
-
-
-
 
 
 </script>
