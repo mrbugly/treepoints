@@ -510,6 +510,7 @@ document.addEventListener("click", function (e) {
 // Add feature + optional attachment
 // ----------------------
 let selectingPoint = false;
+let locationMarker = null;
 
 const crosshair =
   document.getElementById("crosshair");
@@ -601,11 +602,15 @@ document.getElementById("locateBtn").onclick = function () {
   map.locate({ setView: true, maxZoom: 17 });
 };
 map.on("locationfound", function (e) {
-  L.circleMarker(e.latlng, {
-    radius: 8,
-    color: "blue",
+
+  if (locationMarker) {
+    map.removeLayer(locationMarker);
+  }
+  locationMarker = L.circleMarker(e.latlng, {
+    radius: 4,
+    color: "#0078ff",
     weight: 2,
-    fillOpacity: 0.7
+    fillOpacity: 1
   }).addTo(map);
 });
 
