@@ -4,15 +4,12 @@
   <meta charset="utf-8" />
   <title>Tree Points Map</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/esri-leaflet@3.0.8/dist/esri-leaflet.js"></script>
-
   <style>
     body, html { margin:0; padding:0; height:100%; }
     #map { height:100%; }
-
     .locate-btn {
       position:absolute;
       bottom:20px;
@@ -25,7 +22,6 @@
       cursor:pointer;
       box-shadow:0 2px 6px rgba(0,0,0,0.25);
     }
-
     .delete-btn {
       width:100%;
       padding:6px 10px;
@@ -36,13 +32,11 @@
       cursor:pointer;
       margin-top:6px;
     }
-
     /* 🌳 Emoji tree marker */
     .tree-icon {
       font-size: 24px;
       line-height: 24px;
     }
-
     /* 📎 Attach File button */
     .attach-btn {
       display: inline-block;
@@ -56,7 +50,6 @@
       margin-top: 6px;
       font-size: 14px;
     }
-
 	.measure-btn {
 	  position:absolute;
 	  bottom:70px;
@@ -69,17 +62,14 @@
 	  cursor:pointer;
 	  box-shadow:0 2px 6px rgba(0,0,0,0.25);
 	}
-
 	.measure-btn.active {
 	  background:#0078ff;
 	  color:white;
 	  border-color:#005fcc;
 	}
-
 	.measure-cursor {
 	  cursor: crosshair !important;
 	}
-
 	.addpoint-btn {
 	  position:absolute;
 	  bottom:120px;
@@ -93,7 +83,6 @@
 	  box-shadow:0 2px 6px rgba(0,0,0,0.25);
 	}
 
-
 	.edit-btn {
 	  width:100%;
 	  padding:6px 10px;
@@ -105,20 +94,74 @@
 	  margin-top:6px;
 	}
 
-
     /* Hide default file input */
     #newPointPhoto {
       display: none;
     }
+		
+	.crosshair {
+	  position:absolute;
+	  top:50%;
+	  left:50%;
+	  width:32px;
+	  height:32px;
+	  margin-left:-16px;
+	  margin-top:-16px;
+	  z-index:9999;
+	  pointer-events:none;
+	  display:none;
+	}
+
+	.crosshair::before,
+	.crosshair::after {
+	  content:"";
+	  position:absolute;
+	  background:red;
+	}
+
+	.crosshair::before {
+	  left:15px;
+	  top:0;
+	  width:2px;
+	  height:32px;
+	}
+
+	.crosshair::after {
+	  left:0;
+	  top:15px;
+	  width:32px;
+	  height:2px;
+	}
+
+	.confirm-btn {
+	  position:absolute;
+	  bottom:120px;
+	  left:150px;
+	  z-index:1000;
+	  background:#28a745;
+	  color:white;
+	  border:none;
+	  padding:8px 12px;
+	  border-radius:6px;
+	  cursor:pointer;
+	  display:none;
+	  box-shadow:0 2px 6px rgba(0,0,0,0.25);
+	}
+	
   </style>
 </head>
-
 <body>
 <button class="locate-btn" id="locateBtn">📍 Locate Me</button>
 <button class="measure-btn" id="measureBtn">📏 Measure</button>
-<button class="addpoint-btn" id="gpsPointBtn">➕ Add Point Here</button>
-<div id="map"></div>
+<button class="addpoint-btn" id="addPointModeBtn">
+  ➕ Add Point
+</button>
 
+<button id="confirmPointBtn" class="confirm-btn">
+  ✅ Confirm
+</button>
+<div id="map"></div>
+<div id="crosshair" class="crosshair"></div>
 <script>
 // ----------------------
 // Basemaps
@@ -126,9 +169,7 @@
 const imagery = L.esri.imageMapLayer({
   url: "https://services.gis.nc.gov/secure/rest/services/Imagery/Orthoimagery_Latest/ImageServer"
 });
-
 const topo = L.esri.basemapLayer("Topographic");
-
 // ----------------------
 // Map init
 // ----------------------
@@ -137,60 +178,63 @@ const map = L.map("map", {
   zoom: 16,
   layers: [topo]
 });
-
 L.control.layers(
   { "NC Imagery": imagery, "Esri Topographic": topo },
   {},
   { collapsed:false }
 ).addTo(map);
-
 // ----------------------
 // FeatureLayer
 // ----------------------
 const featureLayerUrl =
   "https://services5.arcgis.com/uqbGfOz5OnchALvN/arcgis/rest/services/general_purpose_point_layer/FeatureServer/0";
-
 const featureLayer = L.esri.featureLayer({
   url: featureLayerUrl,
   where: "expired <> 'yes' OR expired IS NULL",
-
   pointToLayer: function (feature, latlng) {
-    return L.marker(latlng, {
-      icon: L.divIcon({
-        className: "tree-icon",
-        html: "🌳",
-        iconSize: [24, 24],
-        iconAnchor: [12, 12]
-      })
-    });
+	return L.marker(
+	  latlng,
+	  {
+		draggable:false,
+		icon:L.divIcon({
+		  className:"tree-icon",
+		  html:"🌳",
+		  iconSize:[24,24],
+		  iconAnchor:[12,12]
+		})
+	  }
+	);
+	;
   },
-
 	onEachFeature: function (feature, layer) {
 	  const attrs = feature.properties || feature.attributes || {};
 	  const objectId = attrs.OBJECTID;
-
 	  const popupHTML = `
 		<div>
 		  <strong>Notes:</strong><br>
 		  <div id="notesDisplay" style="margin:6px 0; padding:6px; border:1px solid #ccc;"></div>
-
-		  <button class="edit-btn" id="editNotesBtn">Edit Notes</button>
-		  <button class="delete-btn" id="deletePointBtn">Delete Point</button>
+          <button class="edit-btn" id="editNotesBtn">Edit Notes</button>
+          
+          <button class="edit-btn" id="movePointBtn">
+            Move Point
+          </button>
+          
+          <button class="delete-btn" id="deletePointBtn">
+            Delete Point
+          </button>
 		</div>
 	  `;
-
 	  layer.bindPopup(popupHTML);
-
 	  layer.on("popupopen", function (ev) {
 		const popupEl = ev.popup.getElement();
 		const notesBox = popupEl.querySelector("#notesDisplay");
-
 		// 🔹 Always show the *current* Notes from the feature
 		const currentNotes = (layer.feature.properties.Notes || "").trim();
 		notesBox.textContent = currentNotes || "(no notes added)";
-
 		const editBtn = popupEl.querySelector("#editNotesBtn");
 		const deleteBtn = popupEl.querySelector("#deletePointBtn");
+		const moveBtn =
+		  popupEl.querySelector("#movePointBtn");
 
 		// EDIT NOTES
 		if (editBtn) {
@@ -203,16 +247,13 @@ const featureLayer = L.esri.featureLayer({
 				Save Notes
 			  </button>
 			`;
-
 			const saveBtn = popupEl.querySelector("#saveNotesBtn");
 			saveBtn.onclick = function () {
 			  const newNotes = popupEl.querySelector("#editNotesArea").value.trim();
-
 			  updateNotesOnServer(objectId, newNotes, function (ok) {
 				if (ok) {
 				  // 🔹 Update local feature
 				  layer.feature.properties.Notes = newNotes;
-
 				  // 🔹 Restore plain text display
 				  notesBox.textContent = newNotes || "(no notes added)";
 				} else {
@@ -222,6 +263,71 @@ const featureLayer = L.esri.featureLayer({
 			};
 		  };
 		}
+
+		if (moveBtn) {
+		  moveBtn.onclick = function () {
+			layer.closePopup();
+			// Store original position
+			const originalLatLng =
+			  layer.getLatLng();
+			// Make marker draggable
+			layer.dragging.enable();
+			const savePopup = `
+			  <div>
+				<strong>
+				  Drag tree to new location
+				</strong>
+				<button id="saveMoveBtn"
+				  class="edit-btn">
+				  Save Location
+				</button>
+				<button id="cancelMoveBtn"
+				  class="delete-btn">
+				  Cancel
+				</button>
+			  </div>
+			`;
+			layer.bindPopup(savePopup)
+			  .openPopup();
+			layer.once("popupopen", function(ev){
+			  const popupEl =
+				ev.popup.getElement();
+			  const saveBtn =
+				popupEl.querySelector(
+				  "#saveMoveBtn"
+				);
+			  const cancelBtn =
+				popupEl.querySelector(
+				  "#cancelMoveBtn"
+				);
+			  saveBtn.onclick = function(){
+				const newLatLng =
+				  layer.getLatLng();
+				updateGeometryOnServer(
+				  objectId,
+				  newLatLng,
+				  function(ok){
+					layer.dragging.disable();
+					if(!ok){
+					  layer.setLatLng(
+						originalLatLng
+					  );
+					}
+					layer.closePopup();
+				  });
+			  };
+			  cancelBtn.onclick =
+				function(){
+				  layer.setLatLng(
+					originalLatLng
+				  );
+				  layer.dragging.disable();
+				  layer.closePopup();
+				};
+			});
+		  };
+		}
+		
 
 		// DELETE POINT
 		if (deleteBtn) {
@@ -233,85 +339,23 @@ const featureLayer = L.esri.featureLayer({
 		}
 	  });
 	}
-
 }).addTo(map);
-
-
-// ----------------------
-// Popup handler 
-// ----------------------
-
-function attachPopupHandlers(layer, objectId) {
-  const popupEl = layer.getPopup().getElement();
-
-  const editBtn = popupEl.querySelector("#editNotesBtn");
-  const deleteBtn = popupEl.querySelector("#deletePointBtn");
-
-  if (editBtn) {
-    editBtn.onclick = function () {
-      const notesBox = popupEl.querySelector("#notesDisplay");
-      const currentNotes = notesBox.innerText.trim();
-
-      notesBox.innerHTML = `
-        <textarea id="editNotesArea"
-          style="width:100%;height:80px;">${currentNotes}</textarea>
-        <button id="saveNotesBtn"
-          style="margin-top:8px;width:100%;padding:6px;background:#28a745;color:white;border:none;border-radius:4px;cursor:pointer;">
-          Save Notes
-        </button>
-      `;
-
-      const saveBtn = popupEl.querySelector("#saveNotesBtn");
-      saveBtn.onclick = function () {
-        const newNotes = popupEl.querySelector("#editNotesArea").value.trim();
-        updateNotesOnServer(objectId, newNotes, function (ok) {
-          if (ok) {
-            layer.feature.properties.Notes = newNotes;
-            notesBox.innerHTML = newNotes;
-
-            notesBox.insertAdjacentHTML("afterend", `
-              <button class="edit-btn" id="editNotesBtn">Edit Notes</button>
-              <button class="delete-btn" id="deletePointBtn">Delete Point</button>
-            `);
-
-            attachPopupHandlers(layer, objectId);
-          }
-        });
-      };
-    };
-  }
-
-  if (deleteBtn) {
-    deleteBtn.onclick = function () {
-      softDeleteOnServer(objectId, function (ok) {
-        if (ok) layer.remove();
-      });
-    };
-  }
-}
-
-
-
-
 
 // ----------------------
 // Update Notes 
 // ----------------------
 function updateNotesOnServer(objectId, newNotes, callback) {
   const url = featureLayerUrl + "/updateFeatures";
-
   const featurePayload = [{
     attributes: {
       OBJECTID: objectId,
       Notes: newNotes
     }
   }];
-
   const params = new URLSearchParams({
     features: JSON.stringify(featurePayload),
     f: "json"
   });
-
   fetch(url, {
     method: "POST",
     body: params
@@ -328,74 +372,59 @@ function updateNotesOnServer(objectId, newNotes, callback) {
   });
 }
 
-
-
-// ----------------------
-// Add point flow 📎 
-// ----------------------
-map.on("click", function (e) {
-
-  // 🚫 BLOCK add‑point popup when measuring
-  if (measuring) return;
-
-  if (e.originalEvent.target.classList.contains("leaflet-interactive")) return;
-
-  const latlng = e.latlng;
-
-  const popupHTML = `
-    <div>
-      <textarea id="newPointNotes"
-        placeholder="Optional notes…"
-        style="width:100%;height:60px;"></textarea>
-
-      <input type="file" id="newPointPhoto" accept="image/*">
-
-      <div class="attach-btn" id="attachFileBtn">Attach File</div>
-
-      <button id="addPointBtn" style="
-      display: inline-block;
-      padding: 4px;
-      background: #0078ff;
-      color: white;
-      border-radius: 0px;
-      cursor: pointer;
-      text-align: center;
-      width: 80%;
-      margin-top: 6px;
-      font-size: 14px;
-      ">Add Point</button>
-    </div>
-  `;
-
-  L.popup()
-    .setLatLng(latlng)
-    .setContent(popupHTML)
-    .openOn(map);
-
-  window._pendingLatLng = latlng;
-});
-
-// ----------------------
-// Delegated click handler
-// ----------------------
-document.addEventListener("click", function (e) {
-
-  // 📎 Attach File button
-  if (e.target && e.target.id === "attachFileBtn") {
-    document.getElementById("newPointPhoto").click();
-  }
-
-
-
+function updateGeometryOnServer(
+  objectId,
+  latlng,
+  callback
+){
+  const url =
+    featureLayerUrl +
+    "/updateFeatures";
+  const payload = [{
+    attributes:{
+      OBJECTID: objectId
+    },
+    geometry:{
+      x: latlng.lng,
+      y: latlng.lat
+    }
+  }];
+  const params =
+    new URLSearchParams({
+      features:
+        JSON.stringify(payload),
+      f:"json"
+    });
+  fetch(url,{
+    method:"POST",
+    body:params
+  })
+  .then(r=>r.json())
+  .then(result=>{
+    const res =
+      result.updateResults &&
+      result.updateResults[0];
+    callback(
+      !!(
+        res &&
+        res.success
+      )
+    );
+  })
+  .catch(err=>{
+    console.warn(
+      "Move point error:",
+      err
+    );
+    callback(false);
+  });
+}
 
 function showAddPointPopup(latlng, accuracyMeters) {
-
   const feet =
     accuracyMeters * 3.28084;
-
   const popupHTML = `
     <div>
-
       <div style="
         margin-bottom:6px;
         font-weight:bold;
@@ -403,8 +432,46 @@ function showAddPointPopup(latlng, accuracyMeters) {
       ">
         Accuracy: ${feet.toFixed(1)} ft
       </div>
-
       <textarea id="newPointNotes"
+        placeholder="Optional notes..."
+        style="width:100%;height:60px;">
+      </textarea>
+      <input
+        type="file"
+        id="newPointPhoto"
+        accept="image/*">
+      <div
+        class="attach-btn"
+        id="attachFileBtn">
+        📎 Attach File
+      </div>
+      <button id="addPointBtn"
+        style="
+          display:inline-block;
+          padding:4px;
+          background:#0078ff;
+          color:white;
+          width:80%;
+          margin-top:6px;
+        ">
+        Save Point
+      </button>
+    </div>
+  `;
+  L.popup()
+    .setLatLng(latlng)
+    .setContent(popupHTML)
+    .openOn(map);
+  window._pendingLatLng = latlng;
+}
+
+function showAddPointPopup(latlng) {
+
+  const popupHTML = `
+    <div>
+
+      <textarea
+        id="newPointNotes"
         placeholder="Optional notes..."
         style="width:100%;height:60px;">
       </textarea>
@@ -420,15 +487,15 @@ function showAddPointPopup(latlng, accuracyMeters) {
         📎 Attach File
       </div>
 
-      <button id="addPointBtn"
+      <button
+        id="savePointBtn"
         style="
           display:inline-block;
           padding:4px;
           background:#0078ff;
           color:white;
           width:80%;
-          margin-top:6px;
-        ">
+          margin-top:6px;">
         Save Point
       </button>
 
@@ -443,33 +510,43 @@ function showAddPointPopup(latlng, accuracyMeters) {
   window._pendingLatLng = latlng;
 }
 
+// ----------------------
+// Delegated click handler
+// ----------------------
+document.addEventListener("click", function (e) {
+  // 📎 Attach File button
+  if (e.target && e.target.id === "attachFileBtn") {
+    document.getElementById("newPointPhoto").click();
+  }
+
 
 
   // Add Point button
-  if (e.target && e.target.id === "addPointBtn") {
+  if (e.target && e.target.id === "savePointBtn") {
     const textarea = document.getElementById("newPointNotes");
     const photoInput = document.getElementById("newPointPhoto");
     const notes = textarea ? textarea.value.trim() : "";
     const latlng = window._pendingLatLng;
-
     if (!latlng) return;
-
     addNewPoint(latlng, notes, photoInput);
-
     map.closePopup();
     window._pendingLatLng = null;
   }
 });
-
 // ----------------------
 // Add feature + optional attachment
 // ----------------------
+let selectingPoint = false;
 
-let collectingPoint = false;
-let gpsSamples = [];
-let pendingAverageLocation = null;
-let gpsWatchId = null;
+const crosshair =
+  document.getElementById("crosshair");
 
+const confirmPointBtn =
+  document.getElementById("confirmPointBtn");
+
+const addPointModeBtn =
+  document.getElementById("addPointModeBtn");
+  
 function addNewPoint(latlng, notes, photoInput) {
   featureLayer.addFeature({
     type: "Feature",
@@ -486,34 +563,28 @@ function addNewPoint(latlng, notes, photoInput) {
       console.warn("Add feature failed:", err);
       return;
     }
-
     const objectId = result && result.objectId;
     if (!objectId) return;
-
     if (photoInput && photoInput.files && photoInput.files.length > 0) {
       uploadAttachment(objectId, photoInput.files[0]);
     }
   });
 }
-
 // ----------------------
 // Soft delete on server
 // ----------------------
 function softDeleteOnServer(objectId, callback) {
   const url = featureLayerUrl + "/updateFeatures";
-
   const featurePayload = [{
     attributes: {
       OBJECTID: objectId,
       expired: "yes"
     }
   }];
-
   const params = new URLSearchParams({
     features: JSON.stringify(featurePayload),
     f: "json"
   });
-
   fetch(url, {
     method: "POST",
     body: params
@@ -530,17 +601,14 @@ function softDeleteOnServer(objectId, callback) {
     callback(false);
   });
 }
-
 // ----------------------
 // Upload attachment
 // ----------------------
 function uploadAttachment(objectId, file) {
   const url = featureLayerUrl + "/" + objectId + "/addAttachment";
-
   const formData = new FormData();
   formData.append("attachment", file);
   formData.append("f", "json");
-
   fetch(url, {
     method: "POST",
     body: formData
@@ -553,14 +621,12 @@ function uploadAttachment(objectId, file) {
     console.error("Attachment upload failed:", err);
   });
 }
-
 // ----------------------
 // Geolocation
 // ----------------------
 document.getElementById("locateBtn").onclick = function () {
   map.locate({ setView: true, maxZoom: 17 });
 };
-
 map.on("locationfound", function (e) {
   L.circleMarker(e.latlng, {
     radius: 8,
@@ -571,92 +637,60 @@ map.on("locationfound", function (e) {
 });
 
 
+addPointModeBtn.onclick = function() {
 
-document.getElementById("gpsPointBtn").onclick = function () {
+  if (measuring) return;
 
-  if (collectingPoint) return;
+  selectingPoint = true;
 
-  collectingPoint = true;
-  gpsSamples = [];
+  crosshair.style.display = "block";
 
-  const btn = document.getElementById("gpsPointBtn");
-  btn.textContent = "📡 Collecting GPS...";
+  confirmPointBtn.style.display = "block";
 
-  gpsWatchId = navigator.geolocation.watchPosition(
-    function(position) {
+  addPointModeBtn.disabled = true;
 
-      gpsSamples.push({
-        lat: position.coords.latitude,
-        lng: position.coords.longitude,
-        accuracy: position.coords.accuracy
-      });
-
-      btn.textContent =
-        `📡 GPS ${gpsSamples.length}/20`;
-
-      if (gpsSamples.length >= 20) {
-
-        navigator.geolocation.clearWatch(gpsWatchId);
-
-        const avgLat =
-          gpsSamples.reduce((s,p)=>s+p.lat,0)
-          / gpsSamples.length;
-
-        const avgLng =
-          gpsSamples.reduce((s,p)=>s+p.lng,0)
-          / gpsSamples.length;
-
-        const avgAccuracy =
-          gpsSamples.reduce((s,p)=>s+p.accuracy,0)
-          / gpsSamples.length;
-
-        pendingAverageLocation =
-          L.latLng(avgLat, avgLng);
-
-        collectingPoint = false;
-        btn.textContent = "➕ Add Point Here";
-
-        showAddPointPopup(
-          pendingAverageLocation,
-          avgAccuracy
-        );
-      }
-
-    },
-    function(err){
-      console.error(err);
-      collectingPoint = false;
-      btn.textContent = "➕ Add Point Here";
-    },
-    {
-      enableHighAccuracy:true,
-      maximumAge:0,
-      timeout:10000
-    }
-  );
+  addPointModeBtn.textContent =
+    "Move Map";
 };
 
+confirmPointBtn.onclick = function() {
+
+  if (!selectingPoint) return;
+
+  selectingPoint = false;
+
+  const selectedLatLng =
+    map.getCenter();
+
+  crosshair.style.display = "none";
+
+  confirmPointBtn.style.display = "none";
+
+  addPointModeBtn.disabled = false;
+
+  addPointModeBtn.textContent =
+    "➕ Add Point";
+
+  showAddPointPopup(
+    selectedLatLng
+  );
+};
 
 // ----------------------
 // Measure
 // ----------------------
 let measuring = false;
 let measureStart = null;
-
 // Arrays to store ALL measurement graphics
 let measureLines = [];
 let measureMarkers = [];
 let measureLabels = [];
-
 const measureBtn = document.getElementById("measureBtn");
-
-
 
 
 // Toggle measure mode
 measureBtn.onclick = function () {
   measuring = !measuring;
-
   if (measuring) {
     measureBtn.classList.add("active");
     map.getContainer().classList.add("measure-cursor");
@@ -667,32 +701,24 @@ measureBtn.onclick = function () {
     clearAllMeasurements();
   }
 };
-
 // Clear ALL measurement graphics
 function clearAllMeasurements() {
   measureStart = null;
-
   measureLines.forEach(line => map.removeLayer(line));
   measureMarkers.forEach(marker => map.removeLayer(marker));
   measureLabels.forEach(label => map.removeLayer(label));
-
   measureLines = [];
   measureMarkers = [];
   measureLabels = [];
 }
-
 // MEASURE CLICK HANDLER
 map.on("click", function (e) {
-
   // 🚫 BLOCK add‑point popup when measuring
   if (!measuring) return;
-
   L.DomEvent.stop(e);
-
   // FIRST POINT
   if (!measureStart) {
     measureStart = e.latlng;
-
     const marker1 = L.marker(e.latlng, {
       icon: L.divIcon({
         className: "measure-point",
@@ -701,14 +727,11 @@ map.on("click", function (e) {
         iconAnchor: [12, 12]
       })
     }).addTo(map);
-
     measureMarkers.push(marker1);
     return;
   }
-
   // SECOND POINT
   const measureEnd = e.latlng;
-
   const marker2 = L.marker(measureEnd, {
     icon: L.divIcon({
       className: "measure-point",
@@ -717,22 +740,17 @@ map.on("click", function (e) {
       iconAnchor: [12, 12]
     })
   }).addTo(map);
-
   measureMarkers.push(marker2);
-
   // Compute distance
   const meters = measureStart.distanceTo(measureEnd);
   const feet = meters * 3.28084;
-
   // Draw dashed line
   const line = L.polyline([measureStart, measureEnd], {
     color: "blue",
     weight: 3,
     dashArray: "6, 6"
   }).addTo(map);
-
   measureLines.push(line);
-
   // Floating label (no popup)
   const label = L.marker(measureEnd, {
     icon: L.divIcon({
@@ -750,13 +768,10 @@ map.on("click", function (e) {
       iconAnchor: [40, -10]
     })
   }).addTo(map);
-
   measureLabels.push(label);
-
   // Reset for next measurement
   measureStart = null;
 });
-
 
 </script>
 </body>
