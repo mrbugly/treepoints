@@ -227,10 +227,17 @@ const featureLayer = L.esri.featureLayer({
 	  layer.bindPopup(popupHTML);
 	  layer.on("popupopen", function (ev) {
 		const popupEl = ev.popup.getElement();
-		const notesBox = popupEl.querySelector("#notesDisplay");
-		// 🔹 Always show the *current* Notes from the feature
-		const currentNotes = (layer.feature.properties.Notes || "").trim();
-		notesBox.textContent = currentNotes || "(no notes added)";
+		if (popupEl.querySelector("#saveMoveBtn")) {
+			return;
+		}
+		const notesBox =
+		  popupEl.querySelector("#notesDisplay");
+		const currentNotes =
+		  (layer.feature.properties.Notes || "").trim();
+		if (notesBox) {
+		  notesBox.textContent =
+			currentNotes || "(no notes added)";
+		}
 		const editBtn = popupEl.querySelector("#editNotesBtn");
 		const deleteBtn = popupEl.querySelector("#deletePointBtn");
 		const moveBtn =
@@ -300,30 +307,37 @@ const featureLayer = L.esri.featureLayer({
 				popupEl.querySelector(
 				  "#cancelMoveBtn"
 				);
-			  saveBtn.onclick = function(){
-				const newLatLng =
-				  layer.getLatLng();
-				updateGeometryOnServer(
-				  objectId,
-				  newLatLng,
-				  function(ok){
-					layer.dragging.disable();
-					if(!ok){
-					  layer.setLatLng(
-						originalLatLng
-					  );
-					}
-					layer.closePopup();
-				  });
-			  };
-			  cancelBtn.onclick =
-				function(){
-				  layer.setLatLng(
-					originalLatLng
-				  );
+
+
+			saveBtn.onclick = function(){
+			  const newLatLng =
+				layer.getLatLng();
+			  updateGeometryOnServer(
+				objectId,
+				newLatLng,
+				function(ok){
 				  layer.dragging.disable();
+				  if(!ok){
+					layer.setLatLng(
+					  originalLatLng
+					);
+				  }
+				  // Restore original popup
+				  layer.bindPopup(popupHTML);
 				  layer.closePopup();
-				};
+				});
+			};
+			  
+			  
+			cancelBtn.onclick = function(){
+			  layer.setLatLng(
+				originalLatLng
+			  );
+			  layer.dragging.disable();
+			  // Restore original popup
+			  layer.bindPopup(popupHTML);
+			  layer.closePopup();
+			};
 			});
 		  };
 		}
@@ -384,10 +398,13 @@ function updateGeometryOnServer(
     attributes:{
       OBJECTID: objectId
     },
-    geometry:{
-      x: latlng.lng,
-      y: latlng.lat
-    }
+	geometry:{
+	  x: latlng.lng,
+	  y: latlng.lat,
+	  spatialReference:{
+		wkid:4326
+	  }
+	}
   }];
   const params =
     new URLSearchParams({
@@ -420,50 +437,6 @@ function updateGeometryOnServer(
   });
 }
 
-function showAddPointPopup(latlng, accuracyMeters) {
-  const feet =
-    accuracyMeters * 3.28084;
-  const popupHTML = `
-    <div>
-      <div style="
-        margin-bottom:6px;
-        font-weight:bold;
-        color:#0078ff;
-      ">
-        Accuracy: ${feet.toFixed(1)} ft
-      </div>
-      <textarea id="newPointNotes"
-        placeholder="Optional notes..."
-        style="width:100%;height:60px;">
-      </textarea>
-      <input
-        type="file"
-        id="newPointPhoto"
-        accept="image/*">
-      <div
-        class="attach-btn"
-        id="attachFileBtn">
-        📎 Attach File
-      </div>
-      <button id="addPointBtn"
-        style="
-          display:inline-block;
-          padding:4px;
-          background:#0078ff;
-          color:white;
-          width:80%;
-          margin-top:6px;
-        ">
-        Save Point
-      </button>
-    </div>
-  `;
-  L.popup()
-    .setLatLng(latlng)
-    .setContent(popupHTML)
-    .openOn(map);
-  window._pendingLatLng = latlng;
-}
 
 function showAddPointPopup(latlng) {
 
